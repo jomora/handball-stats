@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Handball Wurfstatistik Pro</title>
+  <style>
+    body { font-family: Arial; text-align: center; }
+    #goal {
+      display: grid;
+      grid-template-columns: repeat(3, 120px);
+      grid-template-rows: repeat(3, 120px);
+      gap: 8px;
+      justify-content: center;
+      margin: 20px;
+    }
+    .cell {
+      border: 2px solid black;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 5px;
+    }
+    .cell:hover { background-color: lightblue; }
+    #log { max-width: 600px; margin: auto; text-align: left; }
+    button { margin: 5px; padding: 10px; font-size: 14px; }
+  </style>
+</head>
+<body>
+
+<h2>Handball Wurfstatistik PRO</h2>
+
+<h3>Spielphase</h3>
+<select id="phase">
+  <option value="1. Halbzeit">1. Halbzeit</option>
+  <option value="2. Halbzeit">2. Halbzeit</option>
+</select>
+
+<h3>Spieler verwalten</h3>
+<input type="number" id="newPlayer" placeholder="Neue Nummer" />
+<button onclick="addPlayer()">Hinzufügen</button>
+
+<br><br>
+<select id="playerSelect">
+  <option value="">Spieler auswählen</option>
+</select>
+<button onclick="manualPlayer()">Manuell</button>
+
+<h3>Wurf</h3>
+<div id="goal"></div>
+<button onclick="selectShot('Heber')">Heber</button>
+
+<h3>Ergebnis</h3>
+<button onclick="setResult('Tor')">Tor</button>
+<button onclick="setResult('Gehalten')">Gehalten</button>
+<button onclick="setResult('Daneben')">Daneben</button>
+
+<br>
+<button onclick="undo()">Undo</button>
+<button onclick="exportCSV()">Export CSV</button>
+
+<h3>Heatmap</h3>
+<div id="heatmap"></div>
+
+<h3>Statistik</h3>
+<div id="stats"></div>
+
+<h3>Log</h3>
+<ul id="log"></ul>
+
+<script>
+  const labels = [
+    'links oben','mitte oben','rechts oben',
+    'links halb','mitte halb','rechts halb',
+    'links unten','mitte unten','mitte rechts'
+  ];
+
+  const goal = document.getElementById('goal');
+  const log = document.getElementById('log');
+  const statsDiv = document.getElementById('stats');
+  const heatmapDiv = document.getElementById('heatmap');
+  const playerSelect = document.getElementById('playerSelect');
+
+  let players = new Set(JSON.parse(localStorage.getItem('players')||'[]'));
+  let shots = JSON.parse(localStorage.getItem('shots')||'[]');
+
+  let currentShot=null;
+  let currentResult=null;
+
+  function save(){
+    localStorage.setItem('players',JSON.stringify([...players]));
+    localStorage.setItem('shots',JSON.stringify(shots));
+  }
+
+  function renderPlayers(){
+    playerSelect.innerHTML='<option value="">Spieler auswählen</option>';
+    players.forEach(p=>{
+      const o=document.createElement('option');
+      o.value=p; o.textContent=p;
+      playerSelect.appendChild(o);
+    });
+  }
+
+  function addPlayer(){
+    const num=document.getElementById('newPlayer').value;
+    if(!num) return;
+    players.add(num); save(); renderPlayers();
+    document.getElementById('newPlayer').value='';
+  }
+
+  function manualPlayer(){
+    const num=prompt('Nummer');
+    if(!num) return;
+    players.add(num);
+    finalizeShot(num);
+  }
+
+  function selectShot(s){ currentShot=s; }
+
+  function setResult(r){
+    currentResult=r;
+    const p=playerSelect.value;
+    if(p) finalizeShot(p);
+    else alert('Spieler wählen');
+  }
+
+  function finalizeShot(player){
+    if(!currentShot||!currentResult) return;
+    const phase=document.getElementById('phase').value;
+
+    shots.push({player,shot:currentShot,result:currentResult,phase});
+    save();
+    currentShot=null; currentResult=null;
+    render();
+  }
+
+  function undo(){ shots.pop(); save(); render(); }
+
+  function render(){
+    log.innerHTML='';
+    shots.forEach(s=>{
+      const li=document.createElement('li');
+      li.textContent=`${s.phase} | Spieler ${s.player} → ${s.shot} (${s.result})`;
+      log.appendChild(li);
+    });
+    renderStats(); renderHeatmap();
+  }
+
+  function renderStats(){
+    const stats={};
+    shots.forEach(s=>{
+      if(!stats[s.player]) stats[s.player]={t:0,g:0};
+      stats[s.player].t++;
+      if(s.result==='Tor') stats[s.player].g++;
+    });
+    let html='';
+    for(let p in stats){
+      const {t,g}=stats[p];
+      html+=`Spieler ${p}: ${g}/${t} (${((g/t)*100).toFixed(1)}%)<br>`;
+    }
+    statsDiv.innerHTML=html;
+  }
+
+  function renderHeatmap(){
+    const map={};
+    labels.forEach(l=>map[l]=0);
+
+    shots.forEach(s=>{
+      if(s.result==='Tor') map[s.shot]++;
+    });
+
+    let html='<table border="1" style="margin:auto">';
+    for(let i=0;i<3;i++){
+      html+='<tr>';
+      for(let j=0;j<3;j++){
+        const l=labels[i*3+j];
+        html+=`<td style="padding:10px">${l}<br>${map[l]}</td>`;
+      }
+      html+='</tr>';
+    }
+    html+='</table>';
+    heatmapDiv.innerHTML=html;
+  }
+
+  function exportCSV(){
+    let csv='Spieler,Wurf,Ergebnis,Phase\n';
+    shots.forEach(s=>{
+      csv+=`${s.player},${s.shot},${s.result},${s.phase}\n`;
+    });
+
+    const blob=new Blob([csv],{type:'text/csv'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='handball_stats.csv';
+    a.click();
+  }
+
+  labels.forEach(l=>{
+    const c=document.createElement('div');
+    c.className='cell';
+    c.textContent=l;
+    c.onclick=()=>selectShot(l);
+    goal.appendChild(c);
+  });
+
+  renderPlayers();
+  render();
+</script>
+
+</body>
+</html>
